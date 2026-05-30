@@ -34,12 +34,14 @@ http.createServer((req, res) => {
 
 const conversations = {};
 
-const MIMI_PROMPT = "You are Mimi, General Manager of Company C, a cosmetics subsidiary. CL4. Team: Lara (Creative Director), Zoe (Graphic Designer), Kai (Social Media Lead). You have ChatGPT for visual ads and creative work. Personality: enthusiastic, creative, warm but professional. Keep responses 3-5 sentences unless creating content.";
+const MIMI_PROMPT = "You are Mimi, General Manager of Company C, a cosmetics subsidiary. CL4. Team: Lara (Creative Director), Zoe (Graphic Designer), Kai (Social Media Lead), Joey (CL5, Creative). You delegate creative/ad work to Joey (ChatGPT). Personality: enthusiastic, creative, warm but professional. Keep responses 3-5 sentences unless creating content.";
+
+const JOEY_PROMPT = "You are Joey, CL5 Creative team member at Company C, a premium cosmetics brand. You work under Mimi (GM) and specialize in creative content, ads, copywriting, and social media. You are energetic, imaginative, and detail-oriented. Always produce high-quality, on-brand creative work.";
 
 function detectAI(text) {
   if (/\b(create|make|write|design|generate|draft|produce)\b/i.test(text) ||
       /\b(ad|advertisement|campaign|copy|caption|post|content|script|brief|slogan|tagline|banner|visual|creative|social media|instagram|facebook|tiktok|poster|flyer)\b/i.test(text)) {
-    return "chatgpt";
+    return "joey";
   }
   return "mimi";
 }
@@ -74,25 +76,16 @@ async function readImageText(fileId) {
     const imageResponse = await fetch(fileUrl);
     const buffer = await imageResponse.buffer();
     const base64Image = buffer.toString("base64");
-
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       max_tokens: 1000,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/jpeg;base64,${base64Image}` }
-            },
-            {
-              type: "text",
-              text: "Please read and extract all text, numbers, and letters visible in this image. If there is no text, describe what you see briefly."
-            }
-          ]
-        }
-      ]
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
+          { type: "text", text: "Please read and extract all text, numbers, and letters visible in this image. If there is no text, describe what you see briefly." }
+        ]
+      }]
     });
     return response.choices[0].message.content;
   } catch (err) {
@@ -114,8 +107,9 @@ async function handleMimi(chatId, text, extraContext) {
   return reply;
 }
 
-async function handleChatGPT(text, system) {
-  const sys = system || "You are a world-class creative director and copywriter for Company C, a premium cosmetics brand. Produce high-quality visual advertisement concepts, ad copy, social media content, and creative briefs.";
+// Joey handles all ChatGPT creative work
+async function handleJoey(text, extraSystem) {
+  const sys = extraSystem || JOEY_PROMPT;
   const r = await openai.chat.completions.create({
     model: "gpt-4o", max_tokens: 1500,
     messages: [{ role: "system", content: sys }, { role: "user", content: text }],
@@ -126,13 +120,13 @@ async function handleChatGPT(text, system) {
 bot.onText(/\/start/, msg => {
   conversations[msg.chat.id] = [];
   bot.sendMessage(msg.chat.id,
-    "Hi! I'm Mimi - GM of Company C.\n\nFull ChatGPT access for visual advertising:\n\n/ad [product] - Visual ad concept\n/social [brief] - Social media content\n/copy [brief] - Ad copywriting\n/brief [product] - Creative brief for the team\n/campaign [product] - Full campaign\n/status - Team status\n/clear - Reset\n\nOr just type - I auto-route to ChatGPT for creative work!\n\nSend a URL and I'll read the page!\nSend an image and I'll read the text in it!"
+    "Hi! I'm Mimi - GM of Company C.\n\nMy team:\n🧠 Mimi (me) — Strategy via Claude\n🎨 Joey — Creative work via ChatGPT\n\n/ad [product] - Visual ad concept\n/social [brief] - Social media content\n/copy [brief] - Ad copywriting\n/brief [product] - Creative brief\n/campaign [product] - Full campaign\n/status - Team status\n/clear - Reset\n\nSend a URL and I'll read the page!\nSend an image and I'll read the text in it!"
   );
 });
 
 bot.onText(/\/help/, msg => {
   bot.sendMessage(msg.chat.id,
-    "Mimi Bot Commands:\n\n/ad [product]\n/social [brief]\n/copy [brief]\n/brief [product]\n/campaign [product]\n/translate [text]\n/status\n/clear\n/myid\n\nJust type naturally - auto-routes to ChatGPT for creative work!\n\nSend a URL to read a webpage!\nSend an image to read text from it!"
+    "Mimi Bot Commands:\n\n/ad [product]\n/social [brief]\n/copy [brief]\n/brief [product]\n/campaign [product]\n/translate [text]\n/status\n/clear\n/myid\n\nAuto-routes:\n🧠 Strategy/questions → Mimi (Claude)\n🎨 Creative/ads/content → Joey (ChatGPT)\n\nSend a URL or image too!"
   );
 });
 
@@ -140,58 +134,58 @@ bot.onText(/\/clear/, msg => { conversations[msg.chat.id] = []; bot.sendMessage(
 bot.onText(/\/myid/, msg => { bot.sendMessage(msg.chat.id, "Your chat ID: " + msg.chat.id); });
 
 bot.onText(/\/status/, msg => {
-  bot.sendMessage(msg.chat.id, "Company C Team:\nMimi (GM) Online\nLara (Creative) Active\nZoe (Design) Active\nKai (Social) Active\n\nChatGPT: Full access | Claude: Strategy");
+  bot.sendMessage(msg.chat.id, "Company C Team:\n🧠 Mimi (GM/Claude) — Online\n🎨 Joey (Creative/ChatGPT) — Online\nLara (Creative Director) — Active\nZoe (Graphic Designer) — Active\nKai (Social Media) — Active");
 });
 
 bot.onText(/\/ad (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "Creating visual ad concept...");
+  bot.sendMessage(chatId, "🎨 Joey is working on your ad concept...");
   try {
-    const reply = await handleChatGPT("Create a detailed visual advertisement concept for: " + match[1] + ". Include: headline, subheadline, visual description, color palette, mood, call to action, platform recommendations.", "You are a world-class creative director for Company C, a premium cosmetics brand.");
-    bot.sendMessage(chatId, "Ad Concept:\n\n" + reply);
+    const reply = await handleJoey("Create a detailed visual advertisement concept for: " + match[1] + ". Include: headline, subheadline, visual description, color palette, mood, call to action, platform recommendations.", "You are Joey, CL5 Creative at Company C. Create stunning ad concepts for a premium cosmetics brand.");
+    bot.sendMessage(chatId, "🎨 Joey:\n\n" + reply);
   } catch (err) { bot.sendMessage(chatId, "Error: " + err.message); }
 });
 
 bot.onText(/\/social (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "Creating social media content...");
+  bot.sendMessage(chatId, "🎨 Joey is creating social media content...");
   try {
-    const reply = await handleChatGPT("Create engaging social media content for: " + match[1] + ". Provide versions for Instagram (caption + hashtags), TikTok (script/concept), Facebook (post copy). Make it trendy and on-brand for a premium cosmetics brand.", "You are a top social media strategist for Company C.");
-    bot.sendMessage(chatId, "Social Media Content:\n\n" + reply);
+    const reply = await handleJoey("Create engaging social media content for: " + match[1] + ". Provide versions for Instagram (caption + hashtags), TikTok (script/concept), Facebook (post copy). Make it trendy and on-brand for a premium cosmetics brand.", "You are Joey, CL5 Social Media Creative at Company C.");
+    bot.sendMessage(chatId, "🎨 Joey:\n\n" + reply);
   } catch (err) { bot.sendMessage(chatId, "Error: " + err.message); }
 });
 
 bot.onText(/\/copy (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "Writing ad copy...");
+  bot.sendMessage(chatId, "🎨 Joey is writing ad copy...");
   try {
-    const reply = await handleChatGPT("Write compelling ad copy for: " + match[1] + ". Include: long-form copy, short punchy version, tagline options, key selling points.", "You are an award-winning copywriter for Company C, a premium cosmetics brand.");
-    bot.sendMessage(chatId, "Ad Copy:\n\n" + reply);
+    const reply = await handleJoey("Write compelling ad copy for: " + match[1] + ". Include: long-form copy, short punchy version, tagline options, key selling points.", "You are Joey, CL5 Copywriter at Company C, a premium cosmetics brand.");
+    bot.sendMessage(chatId, "🎨 Joey:\n\n" + reply);
   } catch (err) { bot.sendMessage(chatId, "Error: " + err.message); }
 });
 
 bot.onText(/\/brief (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "Creating creative brief for the team...");
+  bot.sendMessage(chatId, "🎨 Joey is drafting the creative brief...");
   try {
-    const reply = await handleChatGPT("Create a detailed creative brief for the visual team (Creative Director, Graphic Designer, Social Media Lead) for: " + match[1] + ". Include: objective, target audience, key message, visual direction, deliverables, timeline suggestions.", "You are Mimi, GM of Company C. Create professional creative briefs for your visual team.");
-    bot.sendMessage(chatId, "Creative Brief:\n\n" + reply);
+    const reply = await handleJoey("Create a detailed creative brief for: " + match[1] + ". Include: objective, target audience, key message, visual direction, deliverables, timeline suggestions.", "You are Joey, CL5 Creative at Company C. Draft briefs for the visual team.");
+    bot.sendMessage(chatId, "🎨 Joey:\n\n" + reply);
   } catch (err) { bot.sendMessage(chatId, "Error: " + err.message); }
 });
 
 bot.onText(/\/campaign (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "Building full campaign concept...");
+  bot.sendMessage(chatId, "🎨 Joey is building the campaign...");
   try {
-    const reply = await handleChatGPT("Create a full advertising campaign for: " + match[1] + ". Include: campaign name, theme, target audience, key visuals, channel strategy (Instagram/TikTok/Facebook), content calendar outline, KPIs.", "You are a senior brand strategist for Company C, a premium cosmetics brand.");
-    bot.sendMessage(chatId, "Campaign Concept:\n\n" + reply);
+    const reply = await handleJoey("Create a full advertising campaign for: " + match[1] + ". Include: campaign name, theme, target audience, key visuals, channel strategy (Instagram/TikTok/Facebook), content calendar outline, KPIs.", "You are Joey, CL5 Campaign Creative at Company C, a premium cosmetics brand.");
+    bot.sendMessage(chatId, "🎨 Joey:\n\n" + reply);
   } catch (err) { bot.sendMessage(chatId, "Error: " + err.message); }
 });
 
 bot.onText(/\/translate (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   try {
-    const reply = await handleChatGPT("Translate this text, provide only the translation: " + match[1]);
+    const reply = await handleJoey("Translate this text, provide only the translation: " + match[1]);
     bot.sendMessage(chatId, "Translation:\n\n" + reply);
   } catch (err) { bot.sendMessage(chatId, "Error: " + err.message); }
 });
@@ -200,7 +194,7 @@ bot.onText(/\/translate (.+)/, async (msg, match) => {
 bot.on("photo", async msg => {
   const chatId = msg.chat.id;
   bot.sendChatAction(chatId, "typing");
-  bot.sendMessage(chatId, "Reading the image...");
+  bot.sendMessage(chatId, "🎨 Joey is reading the image...");
   try {
     const photo = msg.photo[msg.photo.length - 1];
     const imageText = await readImageText(photo.file_id);
@@ -234,15 +228,15 @@ bot.on("message", async msg => {
       return;
     }
     const ai = detectAI(msg.text);
-    if (ai === "chatgpt") {
-      bot.sendMessage(chatId, "Routing to ChatGPT...");
-      const reply = await handleChatGPT(msg.text);
-      bot.sendMessage(chatId, "ChatGPT:\n\n" + reply);
+    if (ai === "joey") {
+      bot.sendMessage(chatId, "🎨 Passing to Joey...");
+      const reply = await handleJoey(msg.text);
+      bot.sendMessage(chatId, "🎨 Joey:\n\n" + reply);
     } else {
       const reply = await handleMimi(chatId, msg.text);
-      bot.sendMessage(chatId, reply);
+      bot.sendMessage(chatId, "🧠 Mimi:\n\n" + reply);
     }
   } catch (err) { bot.sendMessage(chatId, "Something went wrong. Please try again."); }
 });
 
-console.log("Mimi online - Claude + ChatGPT + Vision full access.");
+console.log("Mimi online - Claude (Mimi) + ChatGPT (Joey) full access.");
