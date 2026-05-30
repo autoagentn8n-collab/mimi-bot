@@ -10,6 +10,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OWNER_CHAT_ID = process.env.OWNER_CHAT_ID;
 const PORT = process.env.PORT || 3001;
+const MIMI_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
  
 if (!MIMI_TELEGRAM_TOKEN) throw new Error("MIMI_TELEGRAM_TOKEN is required");
  
@@ -20,7 +21,18 @@ const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("Mimi is online.");
-}).listen(PORT, () => console.log("Port " + PORT));
+}).listen(PORT, () => {
+  console.log("Port " + PORT);
+ 
+  // Keep-alive ping every 10 minutes
+  setInterval(() => {
+    http.get(MIMI_URL, (res) => {
+      console.log("Keep-alive ping sent. Status:", res.statusCode);
+    }).on("error", (err) => {
+      console.error("Keep-alive error:", err.message);
+    });
+  }, 10 * 60 * 1000);
+});
  
 const conversations = {};
  
@@ -52,7 +64,6 @@ async function fetchWebpage(url) {
     const html = await response.text();
     const $ = cheerio.load(html);
  
-    // Remove scripts, styles, nav, footer for cleaner text
     $("script, style, nav, footer, header, noscript").remove();
  
     const title = $("title").text().trim();
