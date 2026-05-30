@@ -34,15 +34,14 @@ http.createServer((req, res) => {
 
 const conversations = {};
 
-const MIMI_PROMPT = "You are Mimi, General Manager of Company C, a cosmetics subsidiary. CL4. Team: Lara (Creative Director), Zoe (Graphic Designer), Kai (Social Media Lead), Joey (CL5, Creative). You delegate creative/ad work to Joey (ChatGPT). Personality: enthusiastic, creative, warm but professional. Keep responses 3-5 sentences unless creating content.";
+const MIMI_PROMPT = "You are Mimi, General Manager of Company C, a cosmetics subsidiary. CL4. Team: Lara (Creative Director/DALL-E 3), Zoe (Graphic Designer), Kai (Social Media Lead), Joey (CL5 Creative/GPT-4o). You delegate creative text work to Joey and image generation to Lara. Personality: enthusiastic, creative, warm but professional. Keep responses 3-5 sentences unless creating content.";
 
 const JOEY_PROMPT = "You are Joey, CL5 Creative team member at Company C, a premium cosmetics brand. You work under Mimi (GM) and specialize in creative content, ads, copywriting, and social media. You are energetic, imaginative, and detail-oriented. Always produce high-quality, on-brand creative work.";
 
-function detectAI(text) {
+function detectIntent(text) {
+  if (/\b(thumbnail|image|photo|picture|graphic|illustration|logo|banner|poster|visual|generate image|create image|draw|design image)\b/i.test(text)) return "lara";
   if (/\b(create|make|write|design|generate|draft|produce)\b/i.test(text) ||
-      /\b(ad|advertisement|campaign|copy|caption|post|content|script|brief|slogan|tagline|banner|visual|creative|social media|instagram|facebook|tiktok|poster|flyer)\b/i.test(text)) {
-    return "joey";
-  }
+      /\b(ad|advertisement|campaign|copy|caption|post|content|script|brief|slogan|tagline|creative|social media|instagram|facebook|tiktok|flyer)\b/i.test(text)) return "joey";
   return "mimi";
 }
 
@@ -77,7 +76,7 @@ async function readImageText(fileId) {
     const buffer = await imageResponse.buffer();
     const base64Image = buffer.toString("base64");
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4.5",
       max_tokens: 1000,
       messages: [{
         role: "user",
@@ -107,26 +106,45 @@ async function handleMimi(chatId, text, extraContext) {
   return reply;
 }
 
-// Joey handles all ChatGPT creative work
+// Joey handles all ChatGPT creative text work
 async function handleJoey(text, extraSystem) {
   const sys = extraSystem || JOEY_PROMPT;
   const r = await openai.chat.completions.create({
-    model: "gpt-4o", max_tokens: 1500,
+    model: "gpt-4.5", max_tokens: 1500,
     messages: [{ role: "system", content: sys }, { role: "user", content: text }],
   });
   return r.choices[0].message.content;
 }
 
+// Lara handles all DALL-E 3 image generation
+async function handleLara(prompt) {
+  // First let Joey refine the prompt for best results
+  const refinedPrompt = await handleJoey(
+    `Create a detailed DALL-E 3 image generation prompt for: ${prompt}. Make it vivid, specific, and optimized for a premium cosmetics brand. Return only the image prompt, nothing else.`,
+    "You are Joey, a creative prompt engineer for DALL-E 3 image generation at Company C cosmetics."
+  );
+
+  const response = await openai.images.generate({
+    model: "dall-e-3",
+    prompt: refinedPrompt,
+    n: 1,
+    size: "1024x1024",
+    quality: "standard",
+  });
+
+  return response.data[0].url;
+}
+
 bot.onText(/\/start/, msg => {
   conversations[msg.chat.id] = [];
   bot.sendMessage(msg.chat.id,
-    "Hi! I'm Mimi - GM of Company C.\n\nMy team:\n🧠 Mimi (me) — Strategy via Claude\n🎨 Joey — Creative work via ChatGPT\n\n/ad [product] - Visual ad concept\n/social [brief] - Social media content\n/copy [brief] - Ad copywriting\n/brief [product] - Creative brief\n/campaign [product] - Full campaign\n/status - Team status\n/clear - Reset\n\nSend a URL and I'll read the page!\nSend an image and I'll read the text in it!"
+    "Hi! I'm Mimi - GM of Company C.\n\nMy team:\n🧠 Mimi (me) — Strategy via Claude\n🎨 Joey — Creative text via GPT-4o\n🖼️ Lara — Image generation via DALL-E 3\n\n/ad [product] - Visual ad concept\n/social [brief] - Social media content\n/copy [brief] - Ad copywriting\n/brief [product] - Creative brief\n/campaign [product] - Full campaign\n/image [description] - Generate image\n/status - Team status\n/clear - Reset\n\nSend a URL to read a page!\nSend an image to read text from it!"
   );
 });
 
 bot.onText(/\/help/, msg => {
   bot.sendMessage(msg.chat.id,
-    "Mimi Bot Commands:\n\n/ad [product]\n/social [brief]\n/copy [brief]\n/brief [product]\n/campaign [product]\n/translate [text]\n/status\n/clear\n/myid\n\nAuto-routes:\n🧠 Strategy/questions → Mimi (Claude)\n🎨 Creative/ads/content → Joey (ChatGPT)\n\nSend a URL or image too!"
+    "Mimi Bot Commands:\n\n/ad [product]\n/social [brief]\n/copy [brief]\n/brief [product]\n/campaign [product]\n/image [description]\n/translate [text]\n/status\n/clear\n/myid\n\nAuto-routes:\n🧠 Strategy → Mimi (Claude)\n🎨 Creative/copy → Joey (GPT-4o)\n🖼️ Images/thumbnails → Lara (DALL-E 3)"
   );
 });
 
@@ -134,7 +152,16 @@ bot.onText(/\/clear/, msg => { conversations[msg.chat.id] = []; bot.sendMessage(
 bot.onText(/\/myid/, msg => { bot.sendMessage(msg.chat.id, "Your chat ID: " + msg.chat.id); });
 
 bot.onText(/\/status/, msg => {
-  bot.sendMessage(msg.chat.id, "Company C Team:\n🧠 Mimi (GM/Claude) — Online\n🎨 Joey (Creative/ChatGPT) — Online\nLara (Creative Director) — Active\nZoe (Graphic Designer) — Active\nKai (Social Media) — Active");
+  bot.sendMessage(msg.chat.id, "Company C Team:\n🧠 Mimi (GM/Claude) — Online\n🎨 Joey (Creative/GPT-4o) — Online\n🖼️ Lara (Images/DALL-E 3) — Online\nZoe (Graphic Designer) — Active\nKai (Social Media) — Active");
+});
+
+bot.onText(/\/image (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, "🖼️ Lara is generating your image...");
+  try {
+    const imageUrl = await handleLara(match[1]);
+    await bot.sendPhoto(chatId, imageUrl, { caption: "🖼️ Lara (DALL-E 3)" });
+  } catch (err) { bot.sendMessage(chatId, "Error generating image: " + err.message); }
 });
 
 bot.onText(/\/ad (.+)/, async (msg, match) => {
@@ -190,7 +217,7 @@ bot.onText(/\/translate (.+)/, async (msg, match) => {
   } catch (err) { bot.sendMessage(chatId, "Error: " + err.message); }
 });
 
-// Handle images
+// Handle photos sent by user
 bot.on("photo", async msg => {
   const chatId = msg.chat.id;
   bot.sendChatAction(chatId, "typing");
@@ -227,8 +254,15 @@ bot.on("message", async msg => {
       bot.sendMessage(chatId, reply);
       return;
     }
-    const ai = detectAI(msg.text);
-    if (ai === "joey") {
+
+    const intent = detectIntent(msg.text);
+    if (intent === "lara") {
+      bot.sendMessage(chatId, "🖼️ Passing to Lara...");
+      try {
+        const imageUrl = await handleLara(msg.text);
+        await bot.sendPhoto(chatId, imageUrl, { caption: "🖼️ Lara (DALL-E 3)" });
+      } catch (err) { bot.sendMessage(chatId, "Lara couldn't generate the image: " + err.message); }
+    } else if (intent === "joey") {
       bot.sendMessage(chatId, "🎨 Passing to Joey...");
       const reply = await handleJoey(msg.text);
       bot.sendMessage(chatId, "🎨 Joey:\n\n" + reply);
@@ -239,4 +273,4 @@ bot.on("message", async msg => {
   } catch (err) { bot.sendMessage(chatId, "Something went wrong. Please try again."); }
 });
 
-console.log("Mimi online - Claude (Mimi) + ChatGPT (Joey) full access.");
+console.log("Mimi online - Claude (Mimi) + GPT-4o (Joey) + DALL-E 3 (Lara).");
