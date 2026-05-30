@@ -1,0 +1,17 @@
+{
+  "name": "mimi-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "mimi-bot.js",
+  "scripts": {
+    "start": "node mimi-bot.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "openai": "^4.77.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
