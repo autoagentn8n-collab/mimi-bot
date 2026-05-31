@@ -88,7 +88,7 @@ async function readImageText(fileId) {
     const base64Image = buffer.toString("base64");
     const response = await openai.chat.completions.create({
       model: "gpt-5.4-mini",
-      max_tokens: 500,
+      max_completion_tokens: 500,
       messages: [{
         role: "user",
         content: [
@@ -123,7 +123,7 @@ async function agentJoey(task, context) {
   const prompt = context ? `Context: ${context}\n\nTask: ${task}` : task;
   const r = await openai.chat.completions.create({
     model: "gpt-5.4-mini",
-    max_tokens: 1200,
+    max_completion_tokens: 1200,
     messages: [
       { role: "system", content: JOEY_PROMPT },
       { role: "user", content: prompt }
