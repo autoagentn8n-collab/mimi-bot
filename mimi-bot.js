@@ -191,44 +191,67 @@ async function agentLara(prompt) {
   return { type: "buffer", data: imageBuffer };
 }
 
-// Team mode — Mimi briefs, Joey & Lara work in PARALLEL
+// Live status tracker — edits a single message to show real-time agent status
+async function sendLiveStatus(chatId, statusObj) {
+  const lines = [
+    "⚡ Team Status:",
+    `🎨 Joey — ${statusObj.joey}`,
+    `🖼️ Lara — ${statusObj.lara}`,
+  ];
+  return lines.join("\n");
+}
+
+// Team mode — Mimi briefs, Joey & Lara work in PARALLEL with live status
 async function handleTeam(chatId, task) {
-  // Mimi starts typing immediately
   bot.sendChatAction(chatId, "typing");
   await bot.sendMessage(chatId, "🏢 Mimi is briefing the team...");
 
-  // Step 1: Mimi creates strategy (fast)
-  bot.sendChatAction(chatId, "typing");
+  // Step 1: Mimi creates strategy
+  const typingInterval1 = setInterval(() => bot.sendChatAction(chatId, "typing"), 4500);
   const strategy = await agentMimi(chatId, `Create a short creative strategy for: ${task}`);
+  clearInterval(typingInterval1);
   await bot.sendMessage(chatId, `🧠 Mimi:\n\n${strategy}`);
 
-  // Step 2: Joey & Lara work IN PARALLEL — both start immediately
-  await bot.sendMessage(chatId, "🎨 Joey is writing... 🖼️ Lara is generating... (working in parallel)");
+  // Step 2: Send live status message
+  const statusMsg = await bot.sendMessage(chatId,
+    "⚡ Team Status:\n🎨 Joey — ⏳ writing...\n🖼️ Lara — ⏳ generating..."
+  );
+  const statusMsgId = statusMsg.message_id;
 
-  // Start typing indicators for both
-  const typingInterval = setInterval(() => bot.sendChatAction(chatId, "typing"), 4500);
+  const typingInterval2 = setInterval(() => bot.sendChatAction(chatId, "typing"), 4500);
+
+  // Track status
+  const status = { joey: "⏳ writing...", lara: "⏳ generating..." };
+
+  const updateStatus = async () => {
+    try {
+      await bot.editMessageText(
+        `⚡ Team Status:\n🎨 Joey — ${status.joey}\n🖼️ Lara — ${status.lara}`,
+        { chat_id: chatId, message_id: statusMsgId }
+      );
+    } catch (e) {}
+  };
 
   try {
     const [copy, image] = await Promise.all([
-      agentJoey(`Strategy: "${strategy}"\n\nWrite ad copy for: ${task}. Include headline, body copy, caption, hashtags.`),
+      agentJoey(`Strategy: "${strategy}"\n\nWrite ad copy for: ${task}. Include headline, body copy, caption, hashtags.`)
+        .then(result => { status.joey = "✅ done!"; updateStatus(); return result; }),
       agentLara(task)
+        .then(result => { status.lara = "✅ done!"; updateStatus(); return result; })
+        .catch(err => { status.lara = "❌ error"; updateStatus(); throw err; })
     ]);
 
-    clearInterval(typingInterval);
+    clearInterval(typingInterval2);
 
-    // Send Joey's copy
     await bot.sendMessage(chatId, `🎨 Joey:\n\n${copy}`);
-
-    // Send Lara's image
     if (image.type === "buffer") {
       await bot.sendPhoto(chatId, image.data, { caption: "🖼️ Lara (Gemini)" });
     } else {
-      await bot.sendPhoto(chatId, image.data, { caption: "🖼️ Lara (DALL-E 3)" });
+      await bot.sendPhoto(chatId, image.data, { caption: "🖼️ Lara (gpt-image-1)" });
     }
-
     await bot.sendMessage(chatId, "✅ Team delivery complete!");
   } catch (err) {
-    clearInterval(typingInterval);
+    clearInterval(typingInterval2);
     await bot.sendMessage(chatId, "Team error: " + err.message);
   }
 }
