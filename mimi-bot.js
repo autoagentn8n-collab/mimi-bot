@@ -119,6 +119,9 @@ async function agentLara(chatId, prompt) {
     `Create a detailed image generation prompt for: ${prompt}. Optimized for premium cosmetics. Return only the prompt.`
   );
 
+  console.log("Lara: imagePrompt =", imagePrompt.slice(0, 100));
+  console.log("Lara: GEMINI_API_KEY present =", !!GEMINI_API_KEY);
+
   // Try Gemini first (free)
   if (GEMINI_API_KEY) {
     try {
@@ -134,11 +137,14 @@ async function agentLara(chatId, prompt) {
         }
       );
       const data = await res.json();
+      console.log("Gemini response:", JSON.stringify(data).slice(0, 200));
       const imgPart = data?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
       if (imgPart) return { data: Buffer.from(imgPart.inlineData.data, "base64"), source: "Gemini" };
+      console.log("Gemini: no image part found, falling back");
     } catch (e) { console.error("Gemini error:", e.message); }
   }
 
+  console.log("Lara: trying gpt-image-1...");
   // Fallback to gpt-image-1
   const r = await openai.images.generate({
     model: "gpt-image-1", prompt: imagePrompt, n: 1, size: "1024x1024"
@@ -220,8 +226,9 @@ async function runLara(chatId, prompt) {
     await bot.sendPhoto(chatId, image.data, { caption: `🖼️ Lara (${image.source})` });
   } catch (e) {
     clearInterval(t);
+    console.error("Lara full error:", e);
     await updateStatus(chatId, sm.message_id, ["⚡ Team Status:", "🖼️ Lara — ❌ error"]);
-    bot.sendMessage(chatId, "Lara error: " + e.message);
+    bot.sendMessage(chatId, `Lara error: ${e.message}\n\nDetails: ${e.status || ""} ${e.code || ""}`);
   }
 }
 
