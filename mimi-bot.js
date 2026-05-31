@@ -166,13 +166,13 @@ async function agentLara(prompt) {
 
   // Fallback to DALL-E 3
   const response = await openai.images.generate({
-    model: "dall-e-3",
+    model: "gpt-image-1",
     prompt: refinedPrompt,
     n: 1,
     size: "1024x1024",
-    quality: "standard",
   });
-  return { type: "url", data: response.data[0].url };
+  const imageBuffer = Buffer.from(response.data[0].b64_json, "base64");
+  return { type: "buffer", data: imageBuffer };
 }
 
 // Team mode — Mimi briefs, Joey & Lara work in PARALLEL
