@@ -34,6 +34,22 @@ http.createServer((req, res) => {
 });
 
 const conversations = {};
+const processing = new Map(); // track per-user processing
+
+async function withUserLock(chatId, fn) {
+  // Each user gets their own async chain — no blocking other users
+  const prev = processing.get(chatId) || Promise.resolve();
+  let resolve;
+  const next = new Promise(r => resolve = r);
+  processing.set(chatId, next);
+  try {
+    await prev;
+    return await fn();
+  } finally {
+    resolve();
+    if (processing.get(chatId) === next) processing.delete(chatId);
+  }
+}
 
 // Keep typing indicator running until task is done
 async function keepTyping(chatId, durationMs) {
@@ -349,6 +365,7 @@ bot.on("message", async msg => {
   const chatId = msg.chat.id;
   bot.sendChatAction(chatId, "typing");
 
+  withUserLock(chatId, async () => {
   try {
     const url = extractURL(msg.text);
     if (url) {
@@ -390,6 +407,7 @@ bot.on("message", async msg => {
       bot.sendMessage(chatId, "🧠 Mimi:\n\n" + reply);
     }
   } catch (err) { bot.sendMessage(chatId, "Something went wrong. Please try again."); }
+  }); // end withUserLock
 });
 
 console.log("Mimi online - Claude (Mimi) + GPT-5.4-mini (Joey) + Gemini/DALL-E 3 (Lara) + Parallel Team Mode.");
