@@ -11,24 +11,35 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OWNER_CHAT_ID = process.env.OWNER_CHAT_ID;
 const PORT = process.env.PORT || 3001;
-const MIMI_URL = (process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace("https://", "http://");
+// Webhook mode — no keep-alive needed
 
 if (!MIMI_TELEGRAM_TOKEN) throw new Error("MIMI_TELEGRAM_TOKEN is required");
 
-const bot = new TelegramBot(MIMI_TELEGRAM_TOKEN, { polling: true });
+const bot = new TelegramBot(MIMI_TELEGRAM_TOKEN, { webHook: true });
+bot.setWebHook(`${process.env.RENDER_EXTERNAL_URL}/bot${MIMI_TELEGRAM_TOKEN}`);
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Mimi is online.");
-}).listen(PORT, () => {
+// Webhook server — no polling, no 409 conflicts
+const server = http.createServer((req, res) => {
+  if (req.method === "POST" && req.url === `/bot${MIMI_TELEGRAM_TOKEN}`) {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", () => {
+      try {
+        bot.processUpdate(JSON.parse(body));
+      } catch (e) {}
+      res.writeHead(200);
+      res.end("OK");
+    });
+  } else {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Mimi is online.");
+  }
+});
+
+server.listen(PORT, () => {
   console.log("Port " + PORT);
-  setInterval(() => {
-    http.get(MIMI_URL, (res) => {
-      console.log("Keep-alive ping. Status:", res.statusCode);
-    }).on("error", (err) => console.error("Keep-alive error:", err.message));
-  }, 10 * 60 * 1000);
 });
 
 // ─── Per-user concurrency lock ───────────────────────────────────────────────
