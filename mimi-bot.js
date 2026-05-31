@@ -42,68 +42,25 @@ async function withUserLock(chatId, fn) {
   finally { resolve(); if (processing.get(chatId) === next) processing.delete(chatId); }
 }
 
-// ─── Persistent sub-agent threads (memory per user) ─────────────────────────
-const joeyThreads = new Map();   // chatId -> threadId
-const laraThreads = new Map();   // chatId -> threadId
-let joeyAssistantId = null;
-let laraAssistantId = null;
+// ─── Persistent sub-agent memory (per user conversation history) ────────────
+const joeyMemory = new Map();  // chatId -> previous_response_id
+const laraMemory = new Map();  // chatId -> previous_response_id
 
-async function getOrCreateJoeyAssistant() {
-  if (joeyAssistantId) return joeyAssistantId;
-  const assistant = await openai.beta.assistants.create({
-    name: "Joey",
-    instructions: "You are Joey, CL5 Creative team member at Company C, a premium cosmetics brand. You specialize in creative content, ads, copywriting, and social media. You are energetic, imaginative, and detail-oriented. Always produce high-quality, on-brand creative work. Remember context from previous messages in this conversation.",
+const JOEY_SYSTEM = "You are Joey, CL5 Creative team member at Company C, a premium cosmetics brand. You specialize in creative content, ads, copywriting, and social media. You are energetic, imaginative, and detail-oriented. Always produce high-quality, on-brand creative work.";
+
+const LARA_SYSTEM = "You are Lara, Creative Director at Company C, a premium cosmetics brand. You specialize in image direction and visual creative strategy. When asked to generate an image, write a detailed vivid image generation prompt optimized for premium cosmetics. Return only the image prompt, nothing else.";
+
+async function runWithMemory(memoryMap, chatId, systemPrompt, userMessage) {
+  const previousId = memoryMap.get(chatId);
+  const params = {
     model: "gpt-5.4-mini",
-  });
-  joeyAssistantId = assistant.id;
-  console.log("Joey assistant created:", joeyAssistantId);
-  return joeyAssistantId;
-}
-
-async function getOrCreateLaraAssistant() {
-  if (laraAssistantId) return laraAssistantId;
-  const assistant = await openai.beta.assistants.create({
-    name: "Lara",
-    instructions: "You are Lara, Creative Director at Company C, a premium cosmetics brand. You specialize in image direction and visual creative strategy. When asked to generate an image, write a detailed, vivid image generation prompt optimized for premium cosmetics. Return only the image prompt, nothing else.",
-    model: "gpt-5.4-mini",
-  });
-  laraAssistantId = assistant.id;
-  console.log("Lara assistant created:", laraAssistantId);
-  return laraAssistantId;
-}
-
-async function getOrCreateThread(threadMap, chatId) {
-  if (threadMap.has(chatId)) return threadMap.get(chatId);
-  const thread = await openai.beta.threads.create();
-  threadMap.set(chatId, thread.id);
-  return thread.id;
-}
-
-async function runAssistant(assistantId, threadId, message) {
-  // Add message to thread
-  await openai.beta.threads.messages.create(threadId, {
-    role: "user",
-    content: message
-  });
-
-  // Run the assistant
-  const run = await openai.beta.threads.runs.create(threadId, {
-    assistant_id: assistantId,
-  });
-
-  // Poll until complete
-  let runStatus = run;
-  while (runStatus.status !== "completed" && runStatus.status !== "failed") {
-    await new Promise(r => setTimeout(r, 1000));
-    runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-  }
-
-  if (runStatus.status === "failed") throw new Error("Assistant run failed: " + runStatus.last_error?.message);
-
-  // Get latest message
-  const messages = await openai.beta.threads.messages.list(threadId);
-  const latest = messages.data[0];
-  return latest.content[0].type === "text" ? latest.content[0].text.value : "No response.";
+    instructions: systemPrompt,
+    input: userMessage,
+    ...(previousId && { previous_response_id: previousId })
+  };
+  const response = await openai.responses.create(params);
+  memoryMap.set(chatId, response.id);
+  return response.output_text;
 }
 
 // ─── Live status bar helper ──────────────────────────────────────────────────
@@ -135,20 +92,14 @@ async function agentMimi(chatId, text, extraContext) {
   return reply;
 }
 
-// ─── Joey sub-agent (OpenAI Assistants API with memory) ──────────────────────
+// ─── Joey sub-agent (Responses API with memory) ──────────────────────────────
 async function agentJoey(chatId, task) {
-  const assistantId = await getOrCreateJoeyAssistant();
-  const threadId = await getOrCreateThread(joeyThreads, chatId);
-  return await runAssistant(assistantId, threadId, task);
+  return await runWithMemory(joeyMemory, chatId, JOEY_SYSTEM, task);
 }
 
-// ─── Lara sub-agent (OpenAI Assistants API + image generation) ───────────────
+// ─── Lara sub-agent (Responses API + image generation) ───────────────────────
 async function agentLara(chatId, prompt) {
-  const assistantId = await getOrCreateLaraAssistant();
-  const threadId = await getOrCreateThread(laraThreads, chatId);
-
-  // Lara generates the image prompt using her assistant memory
-  const imagePrompt = await runAssistant(assistantId, threadId,
+  const imagePrompt = await runWithMemory(laraMemory, chatId, LARA_SYSTEM,
     `Create a detailed image generation prompt for: ${prompt}. Optimized for premium cosmetics. Return only the prompt.`
   );
 
@@ -289,8 +240,8 @@ async function handleTeam(chatId, task) {
 // ─── Commands ─────────────────────────────────────────────────────────────────
 bot.onText(/\/start/, msg => {
   conversations[msg.chat.id] = [];
-  joeyThreads.delete(msg.chat.id);
-  laraThreads.delete(msg.chat.id);
+  joeyMemory.delete(msg.chat.id);
+  laraMemory.delete(msg.chat.id);
   bot.sendMessage(msg.chat.id,
     "Hi! I'm Mimi - GM of Company C.\n\n🧠 Mimi — Strategy (Claude)\n🎨 Joey — Creative sub-agent (GPT-5.4-mini + memory)\n🖼️ Lara — Image sub-agent (Gemini/gpt-image-1 + memory)\n\n/team [task] - Full parallel team\n/ad [product] - Ad concept\n/social [brief] - Social media\n/copy [brief] - Ad copy\n/image [desc] - Generate image\n/brief [product] - Creative brief\n/campaign [product] - Full campaign\n/status - Team status\n/clear - Reset\n\nOr just type naturally!"
   );
@@ -304,8 +255,8 @@ bot.onText(/\/help/, msg => {
 
 bot.onText(/\/clear/, msg => {
   conversations[msg.chat.id] = [];
-  joeyThreads.delete(msg.chat.id);
-  laraThreads.delete(msg.chat.id);
+  joeyMemory.delete(msg.chat.id);
+  laraMemory.delete(msg.chat.id);
   bot.sendMessage(msg.chat.id, "Cleared! Joey and Lara's memory reset too.");
 });
 
